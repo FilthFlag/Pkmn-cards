@@ -1,0 +1,783 @@
+import json
+import random
+import time
+import pygame
+
+pygame.init()
+
+screen_width = 1600  
+screen_height = 1020
+screen = pygame.display.set_mode((screen_width, screen_height))
+pygame.display.set_caption("Pokemon Card Battle")
+# Colors
+white = (255, 255, 255)
+black = (0, 0, 0)
+red = (255, 0, 0)
+green = (0, 255, 0)
+blue = (0, 0, 255)
+yellow = (255, 255, 0)
+# Load images
+background_image = pygame.image.load("images/battle_background.png").convert_alpha()
+background_image = pygame.transform.scale(background_image, (screen_width, screen_height))
+energy_icon_colorless = pygame.image.load("images/colorless.png").convert_alpha()
+energy_icon_colorless = pygame.transform.scale(energy_icon_colorless, (25, 25))
+energy_icon_fire = pygame.image.load("images/fire.png").convert_alpha()
+energy_icon_fire = pygame.transform.scale(energy_icon_fire, (25, 25))
+energy_icon_water = pygame.image.load("images/water.png").convert_alpha()
+energy_icon_water = pygame.transform.scale(energy_icon_water, (25, 25))
+energy_icon_grass = pygame.image.load("images/grass.png").convert_alpha()
+energy_icon_grass = pygame.transform.scale(energy_icon_grass, (25, 25))
+button_image = pygame.image.load("images/button.png").convert_alpha()
+shop_background_image = pygame.image.load("images/shopmenu.png").convert_alpha()
+shop_background_image = pygame.transform.scale(shop_background_image, (screen_width, screen_height))
+backpack_background_image = pygame.image.load("images/backpackmenu.png").convert_alpha()  # Load backpack background
+backpack_background_image = pygame.transform.scale(backpack_background_image, (screen_width, screen_height))  # Scale it
+# Button Dimensions
+button_width = 150
+button_height = 30
+button_spacing = 10
+button_image = pygame.transform.scale(button_image, (button_width, button_height)) # Now button_width and button_height are defined
+
+backpack_image = pygame.image.load("images/backpack.png").convert_alpha()
+backpack_image = pygame.transform.scale(backpack_image, (30, 30))
+shop_image = pygame.image.load("images/shop.png").convert_alpha()
+shop_image = pygame.transform.scale(shop_image, (60, 60))
+menu_background_image = pygame.image.load("images/background.png").convert_alpha()
+menu_background_image = pygame.transform.scale(menu_background_image, (screen_width, screen_height))
+# Font for text
+font = pygame.font.Font("fonts/pokemon_font.ttf", 20)
+
+class PokemonCard:
+    def __init__(self, name, type, energy_cost, attack_power, image_path=None, price=None):
+        self.name = name
+        self.type = type
+        self.energy_cost = energy_cost
+        self.attack_power = attack_power
+        self.hp = 100
+        self.current_hp = self.hp
+        self.image_path = image_path
+        self.experience = 0
+        self.level = 1
+        self.price = price
+        self.current_energy = 0  # Track current energy applied
+
+        if self.image_path:
+            self.image = pygame.image.load(self.image_path).convert_alpha()
+            self.image = pygame.transform.scale(self.image, (150, 225))  # Larger card size
+
+    def __str__(self):
+        return f"{self.name} ({self.type}) - Level: {self.level} - HP: {self.current_hp}/{self.hp} - Energy Cost: {self.energy_cost}, Attack Power: {self.attack_power}"
+
+    def gain_experience(self, amount):
+        self.experience += amount
+        while self.experience >= 5 * self.level:
+            self.level += 1
+            self.attack_power += 1
+            self.hp += 5
+            self.experience -= 5 * self.level
+            self.current_hp = self.hp
+            print(f"You leveled up {self.name} to level {self.level}!")
+
+    def draw(self, x, y):
+        if self.image:
+            screen.blit(self.image, (x, y))
+        else:
+            card_rect = pygame.Rect(x, y, 150, 225)  # Larger card dimensions
+            pygame.draw.rect(screen, white, card_rect, 4)
+            text_surface = font.render(self.name, True, black)
+            screen.blit(text_surface, (x + 5, y + 5))
+            text_surface = font.render(f"Level: {self.level}", True, black)
+            screen.blit(text_surface, (x + 5, y + 30))
+            text_surface = font.render(f"HP: {self.current_hp}/{self.hp}", True, black)
+            screen.blit(text_surface, (x + 5, y + 55))
+        return pygame.Rect(x, y, 150, 225)  # Larger card dimensions
+
+    def take_damage(self, damage, attacker_type=None):
+        if attacker_type and self.type != attacker_type:
+            # Check for type advantages (adjust as needed)
+            if attacker_type == "Fire" and self.type == "Grass":
+                damage *= 1.5  # Fire is super effective against Grass
+            elif attacker_type == "Water" and self.type == "Fire":
+                damage *= 1.5  # Water is super effective against Fire
+            # ... (add other type advantages) ...
+        self.current_hp -= damage
+        if self.current_hp < 0:
+            self.current_hp = 0
+        print(f"{self.name} took {damage} damage. HP is now {self.current_hp}/{self.hp}")
+
+    def is_fainted(self):
+        return self.current_hp == 0
+
+    def add_energy(self, energy_type, amount=1):
+        if energy_type == self.type:  # Check for type synergy
+            self.current_energy += amount
+            print(f"Added {amount} {energy_type} energy to {self.name}!")
+        else:
+            print(f"Cannot add {energy_type} energy to {self.name}.")
+
+    def attack(self):
+        if self.current_energy >= self.energy_cost:
+            print(f"{self.name} attacks!")
+            self.current_energy -= self.energy_cost
+            return self.attack_power
+        else:
+            print(f"{self.name} does not have enough energy to attack.")
+            return 0
+
+class Player:
+    def __init__(self, name):
+        self.name = name
+        self.energy = {"Colorless": 0, "Fire": 0, "Water": 0, "Grass": 0}  # Starting energy
+        self.active_pokemon = None
+        self.wins = 0
+        self.losses = 0
+        self.match_count = 0
+        self.last_energy_gain = time.time()
+        self.coins = 100
+        self.hand = []
+        self.backpack = []
+        self.load_profile()
+    def load_profile(self):
+        try:
+            with open(f"{self.name}.json", "r") as file:
+                profile_data = json.load(file)
+                self.energy = profile_data.get("energy", self.energy)
+                self.active_pokemon = profile_data.get("active_pokemon", None)
+                self.wins = profile_data.get("wins", 0)
+                self.losses = profile_data.get("losses", 0)
+                self.match_count = profile_data.get("match_count", 0)
+                self.last_energy_gain = profile_data.get("last_energy_gain", time.time())
+                self.coins = profile_data.get("coins", 100)
+                self.hand = profile_data.get("hand", [])
+                self.backpack = profile_data.get("backpack", [])
+                       
+        # Ensure player always has an active Pokémon
+        
+            if not self.active_pokemon:
+  
+                self.active_pokemon = self.hand[0] if self.hand else None
+
+        except FileNotFoundError:
+            pass
+        
+
+
+def choose_active_pokemon(self):
+    if self.hand:
+        print("Choose your active Pokémon:")
+        for i, pokemon in enumerate(self.hand):
+            print(f"{i + 1}. {pokemon.name}")
+        choice = int(input("Enter the number of your choice: ")) - 1
+        if 0 <= choice < len(self.hand):
+            self.active_pokemon = self.hand[choice]
+            print(f"You have chosen {self.active_pokemon.name} as your active Pokémon.")
+        else:
+            print("Invalid choice. No active Pokémon chosen.")
+    def __init__(self, name):
+        self.name = name
+        self.energy = {"Colorless": 0, "Fire": 0, "Water": 0, "Grass": 0}  # Starting energy
+        self.active_pokemon = None
+        self.wins = 0
+        self.losses = 0
+        self.match_count = 0
+        self.last_energy_gain = time.time()
+        self.coins = 100
+        self.hand = []
+        self.backpack = []
+        self.load_profile()
+        # Ensure player always has an active Pokémon
+        if not self.active_pokemon:
+            self.choose_active_pokemon()
+
+    def draw_card(self):
+        if self.backpack:
+            # Automatically draw energy card if available
+            for i, card in enumerate(self.backpack):
+                if card.name == "Energy":
+                    self.backpack.pop(i)
+                    self.hand.append(card)
+                    print("You drew an Energy card!")
+                    return
+            print("No Energy cards left in backpack!")
+        else:
+            print("Backpack is empty!")
+
+    def play_energy(self, energy_type):
+        if self.energy[energy_type] > 0:
+            if self.active_pokemon:
+                self.active_pokemon.add_energy(energy_type)
+                self.energy[energy_type] -= 1
+                print(f"You played {energy_type} energy!")
+            else:
+                print("You need to choose an active Pokemon first!")
+        else:
+            print(f"You don't have any {energy_type} energy.")
+
+    def choose_active_pokemon(self):
+        if not self.hand:
+            print("No cards in hand!")
+            return
+
+        print("Choose your active Pokemon:")
+        for i, card in enumerate(self.hand):
+            print(f"{i+1}. {card}")
+
+        while True:
+            try:
+                choice = int(input("Enter your choice: "))
+                if 1 <= choice <= len(self.hand):
+                    self.active_pokemon = self.hand.pop(choice - 1)
+                    print(f"{self.active_pokemon.name} is now active!")
+                    break
+                else:
+                    print("Invalid choice. Please try again.")
+            except ValueError:
+                print("Invalid input. Please enter a number.")
+
+    def attack(self):
+        if not self.active_pokemon:
+            print("No active Pokemon!")
+            return
+
+        if self.energy[self.active_pokemon.type] >= self.active_pokemon.energy_cost:
+            print(f"{self.active_pokemon.name} attacks!")
+            self.energy[self.active_pokemon.type] -= self.active_pokemon.energy_cost
+            return self.active_pokemon.attack_power  # Return attack damage
+        else:
+            print("Not enough energy to attack!")
+            return 0
+
+    def buy_energy(self):
+        if self.energy["Colorless"] < 15:  # Energy cap
+            self.energy["Colorless"] += 1
+            print("Energy purchased!")
+
+    def save_profile(self):
+        data = {
+            "name": self.name,
+            "wins": self.wins,
+            "losses": self.losses,
+            "coins": self.coins,
+            "backpack": self.backpack,
+            "hand": self.hand,
+        }         
+    def check_energy_gain(self):
+        current_time = time.time()
+        if current_time - self.last_energy_gain >= 1800:
+            self.energy["Colorless"] += 1
+            self.last_energy_gain = current_time
+            print("You gained 1 free energy!")
+
+
+class AI:
+    def __init__(self, difficulty):
+        self.energy = {"Colorless": 0, "Fire": 0, "Water": 0, "Grass": 0}  # Starting energy
+        self.active_pokemon = None
+        self.difficulty = difficulty
+
+        self.choose_active_pokemon()
+
+    def choose_active_pokemon(self):
+        starting_pokemon = [
+            PokemonCard("Raikou", "Electric", 2, 20, "raikou.png"),
+            PokemonCard("Garchomp", "Dragon", 3, 25, "garchomp.png"),
+            PokemonCard("Greninja", "Water", 1, 15, "greninja.png"),
+        ]
+        random.shuffle(starting_pokemon)
+
+        self.active_pokemon = random.choice(starting_pokemon)
+        print(f"AI chose {self.active_pokemon.name} as active Pokemon!")
+
+    def attack(self):
+        if not self.active_pokemon:
+            print("No active Pokemon!")
+            return
+
+        if self.energy[self.active_pokemon.type] >= self.active_pokemon.energy_cost:
+            print(f"AI's {self.active_pokemon.name} attacks!")
+            self.energy[self.active_pokemon.type] -= self.active_pokemon.energy_cost
+            return self.active_pokemon.attack_power  # Return attack damage
+        else:
+            print("AI doesn't have enough energy to attack!")
+            return 0
+
+    def play_energy(self):
+        if self.energy["Colorless"] < 15:  # Energy cap
+            self.energy["Colorless"] += 1
+            if self.active_pokemon:
+                self.active_pokemon.add_energy("Colorless")
+            print("AI played energy!")
+
+    def adjust_difficulty(self):
+        if self.difficulty == "easy":
+            if self.energy["Colorless"] < 3:
+                self.energy["Colorless"] += 1
+        elif self.difficulty == "medium":
+            if self.energy["Colorless"] < 4:
+                self.energy["Colorless"] += 1
+
+def display_cards(player, ai):
+    screen.blit(background_image, (0, 0))
+
+    player_card_x = 100
+    player_card_y = screen_height - 200
+    if player.active_pokemon:
+        player.active_pokemon.draw(player_card_x, player_card_y)
+
+    ai_card_x = screen_width - 200
+    ai_card_y = screen_height - 200
+    if ai.active_pokemon:
+        ai.active_pokemon.draw(ai_card_x, ai_card_y)
+    # Energy icons
+    energy_icon_x = 20
+    energy_icon_y = 300
+    for i in range(player.energy["Colorless"]):
+        screen.blit(energy_icon_colorless, (energy_icon_x + i * 25, energy_icon_y))
+    energy_icon_y += 30
+    for i in range(player.energy["Fire"]):
+        screen.blit(energy_icon_fire, (energy_icon_x + i * 25, energy_icon_y))
+    energy_icon_y += 30
+    for i in range(player.energy["Water"]):
+        screen.blit(energy_icon_water, (energy_icon_x + i * 25, energy_icon_y))
+    energy_icon_y += 30
+    for i in range(player.energy["Grass"]):
+        screen.blit(energy_icon_grass, (energy_icon_x + i * 25, energy_icon_y))
+
+    player_info_text = font.render(f"Player: {player.name} - Energy: {player.energy['Colorless']}/15", True, black)  # Display Energy Cap
+    screen.blit(player_info_text, (20, 20))
+
+    ai_info_text = font.render(f"Opponent: AI - Energy: {ai.energy['Colorless']}/15", True, black)  # Display Energy Cap
+    screen.blit(ai_info_text, (screen_width - 200, 20))
+
+    screen.blit(backpack_image, (screen_width - 100, 550))
+    backpack_text = font.render(f"Energy: {player.energy['Colorless']}/5", True, yellow)
+    screen.blit(backpack_text, (screen_width - 100, 580))
+
+    coins_text = font.render(f"Coins: {player.coins}", True, yellow)
+    screen.blit(coins_text, (screen_width - 100, 610))
+
+    # Attack Button
+    attack_button_rect = pygame.Rect(
+        20,  # Left edge position
+        screen_height // 2 - button_height // 2 - button_spacing,  # Centered vertically, adjusted for spacing
+        button_width,
+        button_height
+    )
+    draw_button("Attack", attack_button_rect.left, attack_button_rect.top, button_width, button_height, red, blue, lambda: attack(player, ai))
+
+    # Main Menu Button
+    menu_button_rect = pygame.Rect(
+        screen_width - 200,  # Positioned near the right edge
+        screen_height - 100,  # Positioned near the bottom
+        button_width,
+        button_height
+    )
+    draw_button("Menu", menu_button_rect.left, menu_button_rect.top, button_width, button_height, green, blue, lambda: back_to_menu(player, ai))
+
+    # Play Energy Button (Battlefield)
+    play_energy_button_rect = pygame.Rect(
+        20,  # Left edge position
+        screen_height - 100,  # Positioned near the bottom
+        button_width,
+        button_height
+    )
+    draw_button("Play Energy", play_energy_button_rect.left, play_energy_button_rect.top, button_width, button_height, green, blue, lambda: player.play_energy("Colorless"))
+
+    # Buy Energy Button (Battlefield)
+    buy_energy_button_rect = pygame.Rect(
+        140,  # Left edge position
+        screen_height - 100,  # Positioned near the bottom
+        button_width,
+        button_height
+    )
+    draw_button("Buy Energy", buy_energy_button_rect.left, buy_energy_button_rect.top, button_width, button_height, green, blue, player.buy_energy)
+
+    # Draw Card Button (Battlefield)
+    draw_card_button_rect = pygame.Rect(
+        260,  # Left edge position
+        screen_height - 100,  # Positioned near the bottom
+        button_width,
+        button_height
+    )
+    draw_button("Draw Card", draw_card_button_rect.left, draw_card_button_rect.top, button_width, button_height, green, blue, player.draw_card)
+
+    pygame.display.flip()
+
+def display_shop(player, ai):
+    screen.blit(shop_background_image, (0, 0))  # Set background image
+
+    available_cards = [
+        PokemonCard("Glaceon", "Ice", 3, 25, "glaceon.png", price=50),
+        PokemonCard("Sylveon", "Fairy", 2, 20, "sylveon.png", price=40),
+        PokemonCard("Umbreon", "Dark", 1, 18, "umbreon.png", price=30),
+        PokemonCard("Energy", "Colorless", 0, 0, "energy.png", price=10), # Add Energy card to the shop
+        PokemonCard("Charizard", "Fire", 4, 30, "charizard.png", price=70), # Example Fire Pokemon
+        PokemonCard("Blastoise", "Water", 3, 25, "blastoise.png", price=60), # Example Water Pokemon
+        PokemonCard("Venusaur", "Grass", 2, 20, "venusaur.png", price=50), # Example Grass Pokemon
+        PokemonCard("Fire Energy", "Fire", 0, 0, "fire_energy.png", price=15), # Example Fire Energy card
+        PokemonCard("Water Energy", "Water", 0, 0, "water_energy.png", price=15), # Example Water Energy card
+        PokemonCard("Grass Energy", "Grass", 0, 0, "grass_energy.png", price=15), # Example Grass Energy card
+    ]
+
+    card_x = 150  # Moved a little to the left
+    card_y = 100  # Higher up
+    card_rects = []  # Create a list to store card rectangles
+    for i, card in enumerate(available_cards):
+        if card.price <= player.coins:
+            card_rect = card.draw(card_x, card_y + i * 160)
+            buy_button_rect = pygame.Rect(card_x, card_y + i * 160 + 140, 100, 30)
+            draw_button(f"Buy ({card.price} coins)", buy_button_rect.left, buy_button_rect.top, 100, 30, green, blue, lambda: buy_card(player, card))
+            card_rects.append(card_rect)  # Add card rectangle to the list
+        else:
+            card.draw(card_x, card_y + i * 160)
+            text_surface = font.render("Not Enough Coins", True, yellow)
+            screen.blit(text_surface, (card_x + 5, card_y + i * 160 + 140))
+
+    # Back to Menu Button
+    menu_button_rect = pygame.Rect(
+        20,  # Positioned at the bottom left edge
+        screen_height - 100,  # Positioned near the bottom
+        button_width,
+        button_height
+    )
+    draw_button("Back to Menu", menu_button_rect.left, menu_button_rect.top, button_width, button_height, green, blue, lambda: back_to_menu(player, ai))
+
+    pygame.display.flip()
+
+    # Event handling for card clicks
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                quit()
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    if menu_button_rect.collidepoint(event.pos):
+                        back_to_menu(player, ai)  # Return to the main menu
+                    for i, rect in enumerate(card_rects):
+                        if rect.collidepoint(event.pos):
+                            print(f"Shop card {i+1} clicked!")
+                            break  # Exit the inner loop after a card click
+
+def buy_card(player, card):
+    if player.coins >= card.price:
+        player.coins -= card.price
+        player.backpack.append(card)
+        print(f"You bought {card.name} for {card.price} coins!")
+    else:
+        print("You don't have enough coins!")
+
+def display_backpack(player, ai):
+    screen.blit(backpack_background_image, (0, 0))  # Set backpack background image
+
+    screen.blit(backpack_image, (screen_width // 2 - 30, screen_height // 2 - 30))
+
+    coins_text = font.render(f"Coins: {player.coins}", True, yellow)
+    screen.blit(coins_text, (50, 50))  # Moved to top-left corner
+
+    energy_text = font.render(f"Energy: {player.energy['Colorless']}/5", True, black)
+    screen.blit(energy_text, (50, 80))  # Moved to top-left corner
+
+    # Centered on the left edge, middle of screen
+    backpack_x = 50
+    backpack_y = screen_height // 2 - 100
+    backpack_card_rects = []
+    for i, card in enumerate(player.backpack):
+        card_rect = card.draw(backpack_x, backpack_y + i * 160) # Add rect to variable
+        backpack_card_rects.append(card_rect)  # Add card rectangle to the list
+
+    # Centered on the left edge, middle of screen
+    energy_button_rect = pygame.Rect(
+        50,  # Left edge position
+        screen_height // 2 - button_height // 2 - button_spacing - 100,  # Centered vertically, adjusted for spacing
+        button_width,
+        button_height
+    )
+    draw_button("Play Energy", energy_button_rect.left, energy_button_rect.top, button_width, button_height, green, blue, player.play_energy)
+
+    # Centered on the left edge, middle of screen
+    buy_energy_button_rect = pygame.Rect(
+        50,  # Left edge position
+        screen_height // 2 + button_height // 2 - 100,  # Centered vertically
+        button_width,
+        button_height
+    )
+    draw_button("Buy Energy", buy_energy_button_rect.left, buy_energy_button_rect.top, button_width, button_height, green, blue, player.buy_energy)
+
+    # Back to Menu Button
+    menu_button_rect = pygame.Rect(
+        20,  # Positioned at the bottom left edge
+        screen_height - 100,  # Positioned near the bottom
+        button_width,
+        button_height
+    )
+    draw_button("Back to Menu", menu_button_rect.left, menu_button_rect.top, button_width, button_height, green, blue, lambda: back_to_menu(player, ai))
+
+    pygame.display.flip()
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                quit()
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    if energy_button_rect.collidepoint(event.pos):
+                        player.play_energy()
+                    elif buy_energy_button_rect.collidepoint(event.pos):
+                        player.buy_energy()
+                    elif menu_button_rect.collidepoint(event.pos):
+                        back_to_menu(player, ai)  # Return to the main menu
+                    for i, rect in enumerate(backpack_card_rects):
+                        if rect.collidepoint(event.pos):
+                            print(f"Backpack card {i+1} clicked!")
+                            break
+
+# --- Menu Structure ---
+class Menu:
+    def __init__(self, player, ai):  # Accept player and ai
+        # Load background sound
+        pygame.mixer.music.load("sounds/menu_music.mp3")  # Replace with your sound file
+        pygame.mixer.music.play(-1)  # Play the music on a loop
+
+        # Button positions and rects
+        self.menu_y = screen_height // 2 - 150
+        self.play_button_rect = pygame.Rect(20, self.menu_y, button_width, button_height)
+        self.shop_button_rect = pygame.Rect(20, self.menu_y + button_height + button_spacing, button_width, button_height)
+        self.backpack_button_rect = pygame.Rect(20, self.menu_y + (button_height + button_spacing) * 2, button_width, button_height)
+        self.exit_button_rect = pygame.Rect(20, self.menu_y + (button_height + button_spacing) * 3, button_width, button_height)
+
+        # Store player and ai within the class
+        self.player = player
+        self.ai = ai
+
+    def display(self):
+        """Displays the main menu with buttons."""
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    quit()
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1:
+                        # Check button clicks
+                        if self.play_button_rect.collidepoint(event.pos):
+                            start_game(self.player, self.ai)  # Use self.player and self.ai
+                            pygame.mixer.music.stop()  # Stop menu music when starting the game
+                        elif self.shop_button_rect.collidepoint(event.pos):
+                            display_shop(self.player, self.ai)  # Use self.player
+                        elif self.backpack_button_rect.collidepoint(event.pos):
+                            display_backpack(self.player, self.ai)  # Use self.player
+                        elif self.exit_button_rect.collidepoint(event.pos):
+                            pygame.quit()
+                        break
+
+            # Clear the screen
+            screen.blit(menu_background_image, (0, 0))
+
+      # Draw buttons
+            
+        draw_button("Play", self.play_button_rect.left, self.play_button_rect.top, button_width, button_height, green, blue, lambda: start_game(self.player, self.ai))
+        draw_button("Shop", self.shop_button_rect.left, self.shop_button_rect.top, button_width, button_height, green, blue, lambda: display_shop(self.player, self.ai))
+        draw_button("Backpack", self.backpack_button_rect.left, self.backpack_button_rect.top, button_width, button_height, green, blue, lambda: display_backpack(self.player, self.ai))
+        draw_button("Exit", self.exit_button_rect.left, self.exit_button_rect.top, button_width, button_height, green, blue, pygame.quit)
+        draw_button("Menu", 20, self.menu_y - 100, button_width, button_height, green, blue, lambda: self.display())
+            # Add the back_to_menu function here             
+    def back_to_menu(self):
+        """Returns the player to the main menu."""
+        pygame.mixer.music.stop()
+        self.display()
+
+def back_to_menu(player, ai):
+    """Returns the player to the main menu.""" # Add this function
+    pygame.mixer.music.stop()
+    menu = Menu(player, ai)
+    menu.display()
+
+def main():
+    player_name = input("Enter your name: ") 
+    player = Player(player_name)
+    choose_starting_pokemon(player)
+    ai = AI("easy")  # The AI now chooses its starting Pokémon here
+
+    menu = Menu(player, ai)  # Pass player and ai when creating the Menu instance
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                quit()
+
+        menu.display()  # Display the menu
+
+def start_game(player, ai):
+    print("\n----- Match 1 -----")
+    current_turn = "player"  # Start with the player's turn
+    start_match(player, ai, current_turn)
+
+def start_match(player, ai, current_turn):
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                quit()
+
+        screen.blit(background_image, (0, 0))
+        display_cards(player, ai)
+
+        manage_turn(player, ai, current_turn)  # Manage the current turn
+
+        # Switch turns
+        if current_turn == "player":
+            current_turn = "ai"
+        else:
+            current_turn = "player"
+
+        # Check for game end conditions (e.g., if a Pokémon faints)
+        if player.active_pokemon.is_fainted():
+            ai.wins += 1
+            ai.save_profile()
+            print("\nAI Wins!")
+            # Ask if the player wants to play again
+            play_again = input("Play again? (y/n): ")
+            if play_again.lower() == 'y':
+                # Reset the game state (reset energy, choose new active Pokemon, etc.)
+                player.energy = {"Colorless": 0, "Fire": 0, "Water": 0, "Grass": 0}
+                player.active_pokemon = player.choose_pokemon()
+                ai.energy = {"Colorless": 0, "Fire": 0, "Water": 0, "Grass": 0}
+                ai.active_pokemon = ai.choose_pokemon()
+                player.choose_active_pokemon()
+                ai.choose_active_pokemon()
+                current_turn = "player"  # Start with player's turn
+                start_match(player, ai, current_turn)  # Restart the match
+            else:
+                break  # Exit the game
+        if ai.active_pokemon.is_fainted():
+            player.wins += 1
+            player.coins += 10
+            player.save_profile()
+            print("\nPlayer Wins!")
+            # Ask if the player wants to play again
+            play_again = input("Play again? (y/n): ")
+            if play_again.lower() == 'y':
+                # Reset the game state (reset energy, choose new active Pokemon, etc.)
+                player.energy = {"Colorless": 0, "Fire": 0, "Water": 0, "Grass": 0}
+                player.active_pokemon = None
+                ai.energy = {"Colorless": 0, "Fire": 0, "Water": 0, "Grass": 0}
+                ai.active_pokemon = None
+                player.choose_active_pokemon()
+                ai.choose_active_pokemon()
+                current_turn = "Ai"  # Start with player's turn
+                start_match(player, ai, current_turn)  # Restart the match
+            else:
+                break  # Exit the game
+
+def manage_turn(player, ai, current_turn):
+    if current_turn == "player":
+        # Player's turn
+        player.check_energy_gain()  # Check for energy gain
+        play_energy_button_rect = pygame.Rect(20, 500, 100, 30)
+        draw_button("Play Energy", 20, 500, 100, 30, green, blue, lambda: player.play_energy("Colorless"))
+
+        buy_energy_button_rect = pygame.Rect(140, 500, 100, 30)
+        draw_button("Buy Energy", 140, 500, 100, 30, green, blue, lambda:
+player.buy_energy("Colorless"))
+        # draw_button("Buy Energy", buy_energy_button_rect.left, buy_energy_button_rect.top, button_width, button_height, green, blue, player.buy_energy)
+        # Centered on the left edge, middle of screen
+        attack_button_rect = pygame.Rect(20, 550, button_width, button_height)
+        draw_button("Attack", attack_button_rect.left, attack_button_rect.top, button_width, button_height, green, blue, lambda: player.attack(ai.active_pokemon))
+        switch_button_rect = pygame.Rect(20, 600, button_width, button_height)
+        draw_button("Switch", switch_button_rect.left, switch_button_rect.top, button_width, button_height, green, blue, lambda: player.switch_pokemon())
+        # Centered on the left edge, middle of screen
+        run_button_rect = pygame.Rect(20, 650, button_width, button_height)
+        draw_button("Run", run_button_rect.left, run_button_rect.top, button_width, button_height, green, blue, lambda: player.run_away())
+        # Centered on the left edge, middle of screen
+        menu_button_rect = pygame.Rect(20, 700, button_width, button_height)
+        draw_button("Menu", menu_button_rect.left, menu_button_rect.top, button_width, button_height, green, blue, lambda: back_to_menu(player, ai))
+        # Centered on the left edge, middle of screen
+        backpack_button_rect = pygame.Rect(20, 750, button_width, button_height)
+        draw_button("Backpack", backpack_button_rect.left, backpack_button_rect.top, button_width, button_height, green, blue, lambda: display_backpack(player, ai))
+
+        # Check for energy gain
+        play_energy_button_rect = pygame.Rect(20, 500, 100, 30)
+        draw_button("Play Energy", 20, 500, 100, 30, green, blue, player.play_energy)
+        # Handle player actions (using button clicks)
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    quit()
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1:
+                        if play_energy_button_rect.collidepoint(event.pos):
+                            player.play_energy()
+                        elif buy_energy_button_rect.collidepoint(event.pos):
+                            player.buy_energy()
+                        break  # Exit the inner loop after a player action
+    else:
+        # AI's turn
+        ai.adjust_difficulty()
+        ai.play_energy()
+
+        # AI's Attack
+        attack_damage = ai.attack()
+        if attack_damage > 0:
+            player.active_pokemon.take_damage(attack_damage)
+            print(f"Player's {player.active_pokemon.name} loses {attack_damage} HP.")
+
+def attack(player, ai):
+    if not player.active_pokemon:
+        print("No active Pokemon!")
+        return
+
+    if player.energy >= player.active_pokemon.energy_cost:
+        print(f"{player.active_pokemon.name} attacks!")
+        player.energy -= player.active_pokemon.energy_cost
+        attack_damage = player.active_pokemon.attack_power
+        show_attack_effect(300, 250)
+
+        # Apply damage to the opponent's active Pokémon
+        ai.active_pokemon.take_damage(attack_damage)
+
+        print(f"AI's {ai.active_pokemon.name} loses {attack_damage} HP.")
+        if ai.active_pokemon.is_fainted():
+            player.wins += 1
+            player.coins += 100
+            player.save_profile()
+            print("\nPlayer Wins!")
+        return attack_damage
+    else:
+        print("Not enough energy to attack!")
+
+def choose_starting_pokemon(player_or_ai):
+    starting_pokemon = [
+        PokemonCard("Raikou", "Electric", 2, 20, "raikou.png"),
+        PokemonCard("Garchomp", "Dragon", 3, 25, "garchomp.png"),
+        PokemonCard("Greninja", "Water", 1, 15, "greninja.png")
+    ]
+    random.shuffle(starting_pokemon)
+
+    if isinstance(player_or_ai, Player):
+        print("Choose your starting Pokemon:")
+    else:
+        print("AI is choosing its starting Pokemon:")
+    for i, pokemon in enumerate(starting_pokemon):
+        print(f"{i+1}. {pokemon}")
+
+    while True:
+        try:
+            choice = int(input("Enter your choice: "))
+            if 1 <= choice <= len(starting_pokemon):
+                player_or_ai.active_pokemon = starting_pokemon[choice - 1]
+                print(f"{player_or_ai.active_pokemon.name} is now active!")
+                break
+            else:
+                print("Invalid choice. Please try again.")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+            
+def back_to_menu(player, ai):
+  pygame.mixer.music.stop()
+  menu = Menu(player, ai)
+  menu.display()
+
+if __name__ == "__main__":    main()
